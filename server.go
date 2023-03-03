@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -28,7 +29,7 @@ type adminPortal struct {
 	password string
 }
 
-func NewAdminPortal() *adminPortal {
+func newAdminPortal() *adminPortal {
 	password := os.Getenv("ADMIN_PASSWORD")
 	if password == "" {
 		panic("required env var ADMIN_PASSWORD not set")
@@ -43,7 +44,10 @@ func (a adminPortal) handler(w http.ResponseWriter, r *http.Request) {
 	if !ok || user != "admin" || pass != a.password {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte("username or password is incorrect"))
+		return
 	}
+
+	w.Write([]byte("<html><h1>Super Secret Admin Portal</h1></html>"))
 }
 
 func (h *coasterHandlers) coasters(w http.ResponseWriter, r *http.Request) {
@@ -80,10 +84,40 @@ func (h *coasterHandlers) get(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonBytes)
 }
 
+func (h *coasterHandlers) getRandomCoaster(w http.ResponseWriter, r *http.Request) {
+	h.Lock()
+	defer h.Unlock()
+
+	ids := make([]string, len(h.store))
+
+	i := 0
+	for id := range h.store {
+		ids[i] = id
+		i++
+	}
+	var target string
+	if len(ids) == 0 {
+		w.Write([]byte("No rollercoasters in the list"))
+		w.WriteHeader(http.StatusNotFound)
+		return
+	} else {
+		rand.Seed(time.Now().UnixNano())
+		target = ids[rand.Intn(len(ids))]
+	}
+
+	w.Header().Add("location", fmt.Sprintf("/coasters/%s", target))
+	w.WriteHeader(http.StatusFound)
+}
+
 func (h *coasterHandlers) getCoaster(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.URL.String(), "/")
 	if len(parts) != 3 {
 		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	if parts[2] == "random" {
+		h.getRandomCoaster(w, r)
 		return
 	}
 
@@ -147,8 +181,10 @@ func newCoasterHandlers() *coasterHandlers {
 
 func main() {
 	coasterHandlers := newCoasterHandlers()
+	admin := newAdminPortal()
 	http.HandleFunc("/coasters", coasterHandlers.coasters)
 	http.HandleFunc("/coasters/", coasterHandlers.getCoaster)
+	http.HandleFunc("/admin", admin.handler)
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
 		panic(err)
